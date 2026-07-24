@@ -1,0 +1,6 @@
+{
+  "name": "fit-check",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FIT-CHECK — AI wardrobe stylist with a serverless proxy so visitors never need their own API key."
+}
