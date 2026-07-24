@@ -45,13 +45,29 @@ export default async function handler(req, res) {
     // Hard cap so a malicious/bulk caller can't request huge, expensive completions.
     const safeMaxTokens = Math.min(Number(maxTokens) || 1500, 2000);
 
+    // The frontend sends Anthropic-style content blocks: an array of
+    // { type: "text", text } and { type: "image", source: { type: "base64", media_type, data } }.
+    // Convert those into Gemini's "parts" format.
+    const blocks = Array.isArray(content) ? content : [{ type: "text", text: String(content) }];
+    const parts = blocks.map((block) => {
+      if (block.type === "image" && block.source) {
+        return {
+          inline_data: {
+            mime_type: block.source.media_type || "image/jpeg",
+            data: block.source.data,
+          },
+        };
+      }
+      return { text: block.text || "" };
+    });
+
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: content }] }],
+        contents: [{ parts }],
         generationConfig: { maxOutputTokens: safeMaxTokens },
       }),
     });
