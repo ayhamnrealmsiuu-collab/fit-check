@@ -1,0 +1,2149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>FIT-CHECK — AI Wardrobe Stylist</title>
+<meta name="description" content="Snap your closet, pick a genre, and let AI build the fit." />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" crossorigin></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.0/babel.min.js"></script>
+<style>
+  html, body { background: #07070C; margin: 0; }
+  #root { min-height: 100vh; }
+  #fc-boot-status {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    flex-direction: column; gap: 10px; padding: 24px; text-align: center;
+    font-family: system-ui, sans-serif; color: #EDEFF4; background: #07070C;
+  }
+  #fc-boot-status pre {
+    white-space: pre-wrap; word-break: break-word; text-align: left; max-width: 90vw;
+    background: #131922; border: 1px solid #FF4D6A; border-radius: 8px; padding: 12px;
+    color: #FF9DAF; font-size: 12px; margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+<div id="root">
+  <div id="fc-boot-status">
+    <div style="font-size:14px; opacity:0.7;">Loading FIT-CHECK…</div>
+  </div>
+</div>
+<script>
+  // Surfaces real errors on-page instead of a silent black screen.
+  window.addEventListener("error", function (e) {
+    var el = document.getElementById("fc-boot-status");
+    if (!el) return;
+    el.innerHTML =
+      '<div style="font-size:16px;font-weight:600;">Something failed to load</div>' +
+      '<div style="font-size:13px;opacity:0.75;max-width:480px;">This usually means a script was blocked by network/firewall settings, or by an ad blocker.</div>' +
+      '<pre>' + (e.message || String(e)).replace(/</g, "&lt;") + '</pre>';
+  });
+</script>
+<script type="text/babel" data-presets="react">
+const { useState, useRef, useEffect } = React;
+
+function TiltCard({ children }) {
+  const ref = useRef(null);
+  const [tilt, setTilt] = useState({ x: 0, y: 0 });
+
+  function onMouseMove(e) {
+    const rect = ref.current.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width - 0.5;
+    const py = (e.clientY - rect.top) / rect.height - 0.5;
+    setTilt({ x: py * -14, y: px * 14 });
+  }
+  function onMouseLeave() {
+    setTilt({ x: 0, y: 0 });
+  }
+
+  return (
+    <div style={{ perspective: 1000 }}>
+      <div
+        ref={ref}
+        onMouseMove={onMouseMove}
+        onMouseLeave={onMouseLeave}
+        style={{
+          transform: `rotateX(${tilt.x}deg) rotateY(${tilt.y}deg)`,
+          transition: "transform 0.15s ease-out",
+          transformStyle: "preserve-3d",
+          padding: 28,
+          borderRadius: 20,
+          border: "1px solid #1E2230",
+          background: "rgba(255,255,255,0.03)",
+          boxShadow: "0 20px 60px -20px rgba(164,94,255,0.35)",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SignupGate({ onSignedUp }) {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState("idle"); // idle | loading | error
+  const [message, setMessage] = useState("");
+  const [count, setCount] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/stats")
+      .then((r) => r.json())
+      .then((data) => setCount(data.count || 0))
+      .catch(() => setCount(null));
+  }, []);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setStatus("loading");
+    setMessage("");
+    try {
+      const res = await fetch("/api/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Something went wrong");
+      localStorage.setItem("fitcheck_email", email.trim().toLowerCase());
+      onSignedUp();
+    } catch (err) {
+      setStatus("error");
+      setMessage(err.message || "Signup failed, try again");
+    }
+  }
+
+  return (
+    <div
+      style={{
+        background: "radial-gradient(ellipse 900px 500px at 50% -5%, rgba(164,94,255,0.16), transparent 60%), radial-gradient(ellipse 700px 400px at 100% 20%, rgba(94,235,255,0.08), transparent 60%), #07070C",
+        minHeight: "100vh",
+        color: "#EDEFF4",
+        fontFamily: "'Sora', system-ui, sans-serif",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 18,
+      }}
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+        .fc-display { font-family: 'Chakra Petch', sans-serif; letter-spacing: 0.02em; }
+        .fc-mono { font-family: 'JetBrains Mono', monospace; }
+        .fc-wordmark {
+          font-family: 'Chakra Petch', sans-serif;
+          font-weight: 900;
+          text-align: center;
+          background: linear-gradient(120deg, #5EEBFF 0%, #FF5EDB 25%, #A45EFF 50%, #C9FF3E 75%, #5EEBFF 100%);
+          background-size: 300% 300%;
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+          filter: drop-shadow(0 0 22px rgba(164,94,255,0.35));
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; }
+      `}</style>
+
+      <SparkleField />
+
+      <div style={{ maxWidth: 380, width: "100%", textAlign: "center", position: "relative", zIndex: 1 }}>
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-end", gap: 16, marginBottom: 6 }}>
+          <HoloGarment guideKey="hoodie" size={58} duration="8.5s" floatDelay="0.2s" />
+          <HoloGarment guideKey="shirt" size={78} duration="10s" floatDelay="0s" />
+          <HoloGarment guideKey="pants" size={58} duration="9.2s" floatDelay="0.5s" />
+        </div>
+        <p className="fc-mono" style={{ fontSize: 9.5, color: "#4A5266", margin: "2px 0 0", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          ‹ drag to spin ›
+        </p>
+        <h1 className="fc-wordmark" style={{ fontSize: "clamp(30px, 8vw, 44px)", lineHeight: 1, margin: "6px 0 10px" }}>
+          FIT-CHECK
+        </h1>
+        <p className="fc-mono" style={{ fontSize: 12, color: "#8B93A6", margin: "0 0 28px", textTransform: "uppercase" }}>
+          snap your closet. pick a vibe. we build the fit.
+        </p>
+
+        <TiltCard>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <input
+            type="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="your@email.com"
+            style={{
+              padding: "12px 14px",
+              borderRadius: 10,
+              border: "1px solid #1E2230",
+              background: "#0B0C14",
+              color: "#EDEFF4",
+              fontSize: 14,
+            }}
+          />
+          <button
+            type="submit"
+            disabled={status === "loading"}
+            className="fc-btn"
+            style={{
+              padding: "12px 16px",
+              borderRadius: 10,
+              border: "none",
+              background: "#C9FF3E",
+              color: "#07070C",
+              fontWeight: 700,
+              fontSize: 14,
+              cursor: "pointer",
+            }}
+          >
+            {status === "loading" ? "Signing up..." : "Sign up & enter"}
+          </button>
+        </form>
+
+        {status === "error" && (
+          <p className="fc-mono" style={{ fontSize: 11, color: "#FF6B6B", margin: "10px 0 0" }}>
+            {message}
+          </p>
+        )}
+        {count !== null && (
+          <p className="fc-mono" style={{ fontSize: 11, color: "#8B93A6", margin: "16px 0 0" }}>
+            {count} {count === 1 ? "person has" : "people have"} signed up
+          </p>
+        )}
+        </TiltCard>
+      </div>
+    </div>
+  );
+}
+
+function Root() {
+  const [signedUp, setSignedUp] = useState(
+    () => !!localStorage.getItem("fitcheck_email")
+  );
+
+  if (!signedUp) {
+    return <SignupGate onSignedUp={() => setSignedUp(true)} />;
+  }
+  return <FitCheck />;
+}
+
+// --- Lightweight icon stand-ins (lucide-react isn't available as a plain script) ---
+function Icon({ size = 16, className = "", children }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      {children}
+    </svg>
+  );
+}
+const Plus = (p) => <Icon {...p}><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></Icon>;
+const X = (p) => <Icon {...p}><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></Icon>;
+const Sparkles = (p) => (
+  <Icon {...p}>
+    <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z" />
+    <path d="M19 15l0.7 2 2 0.7-2 0.7-0.7 2-0.7-2-2-0.7 2-0.7z" />
+  </Icon>
+);
+const Shirt = (p) => (
+  <Icon {...p}>
+    <path d="M6 3l4 2h4l4-2 3 4-3 2v10a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V9L3 7z" />
+  </Icon>
+);
+const Loader2 = (p) => (
+  <Icon {...p}>
+    <path d="M21 12a9 9 0 1 1-6.2-8.55" />
+  </Icon>
+);
+const RotateCcw = (p) => (
+  <Icon {...p}>
+    <path d="M3 12a9 9 0 1 0 3-6.7" />
+    <polyline points="3 3 3 9 9 9" />
+  </Icon>
+);
+const AlertCircle = (p) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="10" />
+    <line x1="12" y1="8" x2="12" y2="13" />
+    <line x1="12" y1="16" x2="12.01" y2="16" />
+  </Icon>
+);
+const Palette = (p) => (
+  <Icon {...p}>
+    <circle cx="13.5" cy="6.5" r="0.6" fill="currentColor" />
+    <circle cx="17.5" cy="10.5" r="0.6" fill="currentColor" />
+    <circle cx="8.5" cy="7.5" r="0.6" fill="currentColor" />
+    <circle cx="6.5" cy="12.5" r="0.6" fill="currentColor" />
+    <path d="M12 3a9 9 0 1 0 0 18c1.1 0 2-1 2-2 0-.5-.2-.9-.5-1.3-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4c0-4.4-4-8-9-8z" />
+  </Icon>
+);
+
+// --- Browser-storage shim (replaces claude.ai's window.storage API) ---
+const STORAGE_PREFIX = "fitcheck_v1_";
+window.storage = {
+  async get(key) {
+    const raw = window.localStorage.getItem(STORAGE_PREFIX + key);
+    if (raw === null) throw new Error("Key not found");
+    return { key, value: raw, shared: false };
+  },
+  async set(key, value) {
+    try {
+      window.localStorage.setItem(STORAGE_PREFIX + key, value);
+      return { key, value, shared: false };
+    } catch (err) {
+      console.error("localStorage set failed:", err);
+      return null;
+    }
+  },
+  async delete(key) {
+    window.localStorage.removeItem(STORAGE_PREFIX + key);
+    return { key, deleted: true, shared: false };
+  },
+  async list(prefix = "") {
+    const keys = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith(STORAGE_PREFIX + prefix)) {
+        keys.push(k.slice(STORAGE_PREFIX.length));
+      }
+    }
+    return { keys, prefix, shared: false };
+  },
+};
+
+const GENRES = [
+  "Streetwear",
+  "Old Money",
+  "Y2K",
+  "Grunge",
+  "Cottagecore",
+  "Dark Academia",
+  "Athleisure",
+  "Boho",
+  "Minimalist",
+  "Preppy",
+  "Business Casual",
+  "Festival",
+];
+
+const CATEGORIES = [
+  { key: "shirt", label: "Shirt" },
+  { key: "hoodie", label: "Hoodie" },
+  { key: "fullsleeve", label: "Full Sleeve" },
+  { key: "pants", label: "Pants" },
+  { key: "shorts", label: "Shorts" },
+  { key: "shoes", label: "Shoes" },
+  { key: "watch", label: "Watch" },
+  { key: "ring", label: "Ring" },
+  { key: "jewelry", label: "Jewelry" },
+  { key: "accessory", label: "Other Accessory" },
+];
+
+// Guide shapes live in a 0–100 coordinate space so they scale with any
+// camera preview size. `mask` shapes define the dimmed cutout area (the
+// "put your item here" zone); `line` shapes are extra visual detail only.
+const GUIDES = {
+  shirt: {
+    mask: ["M40,20 L60,20 L70,26 L86,38 L74,48 L68,42 L68,82 L32,82 L32,42 L26,48 L14,38 L30,26 Z"],
+    line: [],
+    bbox: { x: 9, y: 15, w: 82, h: 72 },
+  },
+  hoodie: {
+    mask: ["M40,24 L60,24 L70,30 L88,54 L76,62 L68,46 L68,85 L32,85 L32,46 L24,62 L12,54 L30,30 Z"],
+    line: ["M36,24 Q50,6 64,24", "M40,64 L60,64 L60,76 L40,76 Z"],
+    bbox: { x: 7, y: 19, w: 86, h: 71 },
+  },
+  fullsleeve: {
+    mask: ["M40,20 L60,20 L70,26 L84,32 L78,66 L68,62 L68,85 L32,85 L32,62 L22,66 L16,32 L30,26 Z"],
+    line: [],
+    bbox: { x: 11, y: 15, w: 78, h: 75 },
+  },
+  pants: {
+    mask: ["M34,14 L66,14 L66,24 L59,24 L59,90 L47,90 L47,30 L53,30 L53,24 L47,24 L47,30 L41,30 L41,90 L34,90 L34,24 Z"],
+    line: [],
+    bbox: { x: 29, y: 9, w: 42, h: 82 },
+  },
+  shorts: {
+    mask: ["M34,14 L66,14 L66,24 L59,24 L59,50 L47,50 L47,30 L53,30 L53,24 L47,24 L47,30 L41,30 L41,50 L34,50 L34,24 Z"],
+    line: [],
+    bbox: { x: 29, y: 9, w: 42, h: 41 },
+  },
+  shoes: {
+    mask: ["M15,68 Q14,54 30,50 L60,42 Q78,40 84,50 Q90,58 78,62 L70,66 Q68,72 55,72 L22,72 Q13,72 15,68 Z"],
+    line: [],
+    bbox: { x: 8, y: 35, w: 87, h: 42 },
+  },
+  accessory: {
+    mask: [],
+    line: [],
+    rect: { x: 25, y: 25, w: 50, h: 50, rx: 14 },
+    bbox: { x: 18, y: 18, w: 64, h: 64 },
+  },
+  watch: {
+    mask: [],
+    line: [],
+    // face + strap, drawn as a rect (strap band) plus a circle (watch face)
+    rect: { x: 42, y: 12, w: 16, h: 76, rx: 6 },
+    circle: { cx: 50, cy: 42, r: 20 },
+    bbox: { x: 24, y: 15, w: 52, h: 70 },
+  },
+  ring: {
+    mask: [],
+    line: [],
+    circle: { cx: 50, cy: 50, r: 22 },
+    bbox: { x: 20, y: 20, w: 60, h: 60 },
+  },
+  jewelry: {
+    mask: [],
+    line: [],
+    circle: { cx: 50, cy: 46, r: 30 },
+    bbox: { x: 12, y: 10, w: 76, h: 76 },
+  },
+};
+
+const POSTERS = [
+  {
+    genre: "Streetwear",
+    tagline: "Oversized. Loud. Layered.",
+    badge: "🔥 TRENDING",
+    accent: "#C9FF3E",
+    bg: "linear-gradient(160deg, #1B2314 0%, #07070C 65%)",
+    items: ["hoodie", "pants", "shoes"],
+  },
+  {
+    genre: "Business Casual",
+    tagline: "Sharp lines. Quiet confidence.",
+    badge: "💼 OFFICE READY",
+    accent: "#8FB3FF",
+    bg: "linear-gradient(160deg, #14192B 0%, #07070C 65%)",
+    items: ["fullsleeve", "pants", "accessory"],
+  },
+  {
+    genre: "Old Money",
+    tagline: "Heritage fabric. Zero logos.",
+    badge: "✨ TIMELESS",
+    accent: "#E8D9A6",
+    bg: "linear-gradient(160deg, #24200F 0%, #07070C 65%)",
+    items: ["shirt", "pants", "shoes"],
+  },
+];
+
+function GarmentIcon({ guideKey, color }) {
+  const guide = GUIDES[guideKey];
+  if (!guide) return null;
+  return (
+    <svg viewBox="0 0 100 100" style={{ width: "100%", height: "100%" }}>
+      {guide.mask.map((d, i) => (
+        <path key={i} d={d} fill={color} opacity="0.92" />
+      ))}
+      {guide.rect && (
+        <rect
+          x={guide.rect.x}
+          y={guide.rect.y}
+          width={guide.rect.w}
+          height={guide.rect.h}
+          rx={guide.rect.rx}
+          fill={color}
+          opacity="0.92"
+        />
+      )}
+    </svg>
+  );
+}
+
+const HOLO_GRADIENT = "linear-gradient(120deg, #5EEBFF 0%, #FF5EDB 25%, #A45EFF 50%, #C9FF3E 75%, #5EEBFF 100%)";
+const HOLO_GRADIENT_BACK = "linear-gradient(120deg, #1B6E82 0%, #7A2E63 25%, #4B2E80 50%, #6B8A1E 75%, #1B6E82 100%)";
+
+function HoloGarment({ guideKey, size = 92, duration = "9s", floatDelay = "0s" }) {
+  const guide = GUIDES[guideKey];
+  const d = guide?.mask?.[0];
+  const [dragging, setDragging] = useState(false);
+  const [angle, setAngle] = useState(0);
+  const dragStartX = useRef(0);
+  const dragStartAngle = useRef(0);
+
+  if (!d) return null;
+  const clip = `path('${d}')`;
+  const scale = size / 100;
+
+  function onPointerDown(e) {
+    setDragging(true);
+    dragStartX.current = e.clientX;
+    dragStartAngle.current = angle;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  }
+  function onPointerMove(e) {
+    if (!dragging) return;
+    const delta = (e.clientX - dragStartX.current) * 1.4;
+    setAngle(dragStartAngle.current + delta);
+  }
+  function onPointerUp() {
+    setDragging(false);
+  }
+
+  return (
+    <div
+      className="fc-holo-float"
+      style={{ width: size, height: size, position: "relative", animationDelay: floatDelay }}
+    >
+      <div
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={dragging ? undefined : onPointerUp}
+        onPointerCancel={onPointerUp}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: 100,
+          height: 100,
+          transform: `scale(${scale})`,
+          transformOrigin: "top left",
+          perspective: 600,
+          filter: "drop-shadow(0 8px 20px rgba(164,94,255,0.4))",
+          touchAction: "none",
+          cursor: dragging ? "grabbing" : "grab",
+        }}
+      >
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            position: "relative",
+            transformStyle: "preserve-3d",
+            transform: dragging ? `rotateY(${angle}deg)` : undefined,
+            animation: dragging ? "none" : `fc-spinY ${duration} linear infinite`,
+          }}
+        >
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              backfaceVisibility: "hidden",
+              clipPath: clip,
+              background: HOLO_GRADIENT,
+              backgroundSize: "300% 300%",
+              animation: "fc-holo-shift 5s linear infinite",
+            }}
+          />
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              backfaceVisibility: "hidden",
+              transform: "rotateY(180deg) scaleX(-1)",
+              clipPath: clip,
+              background: HOLO_GRADIENT_BACK,
+              backgroundSize: "300% 300%",
+              animation: "fc-holo-shift 5s linear infinite reverse",
+              opacity: 0.9,
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const MAX_DIM = 1100;
+
+async function resizeImage(file) {
+  // Prefer createImageBitmap with imageOrientation so EXIF rotation
+  // (very common on phone photos) is applied before we draw to canvas.
+  // Without this, portrait photos can get sent to the model sideways
+  // or upside-down, which is a common cause of clothes being misread.
+  if (typeof createImageBitmap === "function") {
+    try {
+      const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+      let { width, height } = bitmap;
+      if (width > height && width > MAX_DIM) {
+        height = Math.round((height * MAX_DIM) / width);
+        width = MAX_DIM;
+      } else if (height > MAX_DIM) {
+        width = Math.round((width * MAX_DIM) / height);
+        height = MAX_DIM;
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      return canvas.toDataURL("image/jpeg", 0.86);
+    } catch (err) {
+      console.error("createImageBitmap failed, falling back:", err);
+      // fall through to the Image-based approach below
+    }
+  }
+
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > height && width > MAX_DIM) {
+          height = Math.round((height * MAX_DIM) / width);
+          width = MAX_DIM;
+        } else if (height > MAX_DIM) {
+          width = Math.round((width * MAX_DIM) / height);
+          height = MAX_DIM;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.86));
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function callClaude(content, maxTokens, attempt = 1) {
+  let response, data;
+  const email = localStorage.getItem("fitcheck_email") || "";
+  try {
+    response = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, maxTokens, email }),
+    });
+    data = await response.json();
+  } catch (networkErr) {
+    if (attempt < 2) {
+      await new Promise((r) => setTimeout(r, 800));
+      return callClaude(content, maxTokens, attempt + 1);
+    }
+    throw new Error(`Network error: ${networkErr.message || "couldn't reach the server"}`);
+  }
+
+  if (!response.ok) {
+    console.error("Claude API error, full response:", data);
+    if (data?.error?.code === "DAILY_LIMIT") {
+      throw new Error(data.error.message || "Daily limit reached, try again tomorrow");
+    }
+    // Retry once on server-side/transient errors (5xx or overloaded), not on 4xx client errors
+    if (attempt < 2 && (response.status >= 500 || response.status === 429)) {
+      await new Promise((r) => setTimeout(r, 900));
+      return callClaude(content, maxTokens, attempt + 1);
+    }
+    throw new Error(describeApiError(response.status, data));
+  }
+
+  const text = (data.content || [])
+    .map((b) => b.text || "")
+    .join("")
+    .trim();
+
+  if (!text) throw new Error("Empty response from model");
+  return extractJson(text);
+}
+
+function describeApiError(status, data) {
+  const parts = [`HTTP ${status}`];
+  const msg = data?.error?.message || data?.message;
+  if (msg) parts.push(msg);
+  const type = data?.error?.type || data?.type;
+  if (type) parts.push(`(${type})`);
+  if (!msg && !type) {
+    try {
+      parts.push(JSON.stringify(data).slice(0, 300));
+    } catch {
+      parts.push(String(data).slice(0, 300));
+    }
+  }
+  return parts.join(" — ");
+}
+
+function extractJson(rawText) {
+  let text = rawText.trim();
+
+  // Strip ```json ... ``` or ``` ... ``` fences if present
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch) text = fenceMatch[1].trim();
+
+  // Normalize smart quotes that models sometimes emit inside "JSON-only" replies
+  text = text.replace(/[""]/g, '"').replace(/['']/g, "'");
+
+  const tryParse = (s) => {
+    try {
+      return JSON.parse(s);
+    } catch {
+      return null;
+    }
+  };
+
+  // 1: parse as-is
+  let parsed = tryParse(text);
+  if (parsed) return parsed;
+
+  // 2: grab the outermost { ... } span and retry
+  const braceMatch = text.match(/\{[\s\S]*\}/);
+  if (braceMatch) {
+    parsed = tryParse(braceMatch[0]);
+    if (parsed) return parsed;
+
+    // 3: remove trailing commas before } or ] and retry (common model slip)
+    const cleaned = braceMatch[0].replace(/,\s*([}\]])/g, "$1");
+    parsed = tryParse(cleaned);
+    if (parsed) return parsed;
+  }
+
+  const snippet = rawText.slice(0, 180).replace(/\s+/g, " ");
+  throw new Error(`Response wasn't valid JSON. Got: "${snippet}${rawText.length > 180 ? "…" : ""}"`);
+}
+
+function GarmentGuideOverlay({ categoryKey }) {
+  const guide = GUIDES[categoryKey] || GUIDES.shirt;
+  const maskId = `guide-mask-${categoryKey}`;
+  return (
+    <svg
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}
+    >
+      <defs>
+        <mask id={maskId}>
+          <rect width="100" height="100" fill="white" />
+          {guide.mask.map((d, i) => (
+            <path key={i} d={d} fill="black" />
+          ))}
+          {guide.rect && (
+            <rect
+              x={guide.rect.x}
+              y={guide.rect.y}
+              width={guide.rect.w}
+              height={guide.rect.h}
+              rx={guide.rect.rx}
+              fill="black"
+            />
+          )}
+          {guide.circle && (
+            <circle cx={guide.circle.cx} cy={guide.circle.cy} r={guide.circle.r} fill="black" />
+          )}
+        </mask>
+      </defs>
+      <rect width="100" height="100" fill="rgba(20,19,15,0.6)" mask={`url(#${maskId})`} />
+      {guide.mask.map((d, i) => (
+        <path key={`m${i}`} d={d} fill="none" stroke="#C9FF3E" strokeWidth="1" strokeDasharray="2.5 2" />
+      ))}
+      {guide.line.map((d, i) => (
+        <path key={`l${i}`} d={d} fill="none" stroke="#C9FF3E" strokeWidth="0.8" strokeDasharray="2 1.5" opacity="0.8" />
+      ))}
+      {guide.rect && (
+        <rect
+          x={guide.rect.x}
+          y={guide.rect.y}
+          width={guide.rect.w}
+          height={guide.rect.h}
+          rx={guide.rect.rx}
+          fill="none"
+          stroke="#C9FF3E"
+          strokeWidth="1"
+          strokeDasharray="2.5 2"
+        />
+      )}
+      {guide.circle && (
+        <circle
+          cx={guide.circle.cx}
+          cy={guide.circle.cy}
+          r={guide.circle.r}
+          fill="none"
+          stroke="#C9FF3E"
+          strokeWidth="1"
+          strokeDasharray="2.5 2"
+        />
+      )}
+    </svg>
+  );
+}
+
+function SparkleField() {
+  const canvasRef = useRef(null);
+  const pointerRef = useRef({ x: -9999, y: -9999, active: false });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const COLORS = ["#5EEBFF", "#FF5EDB", "#A45EFF", "#C9FF3E"];
+    let particles = [];
+    let raf;
+
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      const count = Math.max(20, Math.min(48, Math.floor((canvas.width * canvas.height) / 26000)));
+      particles = Array.from({ length: count }, () => ({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: (Math.random() - 0.5) * 0.15,
+        vy: (Math.random() - 0.5) * 0.15,
+        r: Math.random() * 1.5 + 0.6,
+        color: COLORS[Math.floor(Math.random() * COLORS.length)],
+        baseAlpha: Math.random() * 0.35 + 0.12,
+      }));
+    }
+    resize();
+    window.addEventListener("resize", resize);
+
+    function onMove(e) {
+      const t = e.touches && e.touches[0] ? e.touches[0] : e;
+      if (t && typeof t.clientX === "number") {
+        pointerRef.current = { x: t.clientX, y: t.clientY, active: true };
+      }
+    }
+    function onLeave() {
+      pointerRef.current.active = false;
+    }
+    window.addEventListener("pointermove", onMove, { passive: true });
+    window.addEventListener("touchmove", onMove, { passive: true });
+    window.addEventListener("pointerup", onLeave, { passive: true });
+    window.addEventListener("touchend", onLeave, { passive: true });
+    window.addEventListener("pointercancel", onLeave, { passive: true });
+
+    function tick() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const p = pointerRef.current;
+      for (const particle of particles) {
+        particle.x += particle.vx;
+        particle.y += particle.vy;
+        if (particle.x < 0) particle.x = canvas.width;
+        if (particle.x > canvas.width) particle.x = 0;
+        if (particle.y < 0) particle.y = canvas.height;
+        if (particle.y > canvas.height) particle.y = 0;
+
+        let alpha = particle.baseAlpha;
+        let radius = particle.r;
+
+        if (p.active) {
+          const dx = particle.x - p.x;
+          const dy = particle.y - p.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          const influence = 150;
+          if (dist < influence) {
+            const force = 1 - dist / influence;
+            particle.x += (dx / dist) * force * 2.2;
+            particle.y += (dy / dist) * force * 2.2;
+            alpha = Math.min(1, alpha + force * 0.65);
+            radius = particle.r + force * 2.4;
+          }
+        }
+
+        ctx.beginPath();
+        ctx.fillStyle = particle.color;
+        ctx.globalAlpha = alpha;
+        ctx.arc(particle.x, particle.y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      raf = requestAnimationFrame(tick);
+    }
+    tick();
+
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", resize);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("pointerup", onLeave);
+      window.removeEventListener("touchend", onLeave);
+      window.removeEventListener("pointercancel", onLeave);
+    };
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{ position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none" }}
+    />
+  );
+}
+
+function SwingTag({ rotate = -8, className = "" }) {
+  return (
+    <svg
+      className={className}
+      style={{ transform: `rotate(${rotate}deg)` }}
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+    >
+      <circle cx="12" cy="12" r="10" stroke="#07070C" strokeWidth="1.4" fill="#C9FF3E" />
+      <circle cx="12" cy="12" r="3" fill="#07070C" />
+    </svg>
+  );
+}
+
+function FitCheck() {
+  const [items, setItems] = useState([]);
+  const [genre, setGenre] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+  const [lookNumber, setLookNumber] = useState(0);
+  const [colorResult, setColorResult] = useState(null);
+  const [colorLoading, setColorLoading] = useState(false);
+  const [colorError, setColorError] = useState("");
+  const [closetLoading, setClosetLoading] = useState(true);
+  const [saveError, setSaveError] = useState("");
+  const [storageAvailable, setStorageAvailable] = useState(true);
+
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraCategory, setCameraCategory] = useState("shirt");
+  const [cameraError, setCameraError] = useState("");
+  const [cameraReady, setCameraReady] = useState(false);
+  const [previewShot, setPreviewShot] = useState(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const libraryFallbackRef = useRef(null);
+  const genreSectionRef = useRef(null);
+
+  function jumpToGenre(g) {
+    setGenre(g);
+    setResult(null);
+    requestAnimationFrame(() => {
+      genreSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  useEffect(() => {
+    async function loadCloset() {
+      if (typeof window.storage === "undefined") {
+        setStorageAvailable(false);
+        setClosetLoading(false);
+        return;
+      }
+      try {
+        const listRes = await window.storage.list("closet:", false);
+        const keys = listRes?.keys || [];
+        const loaded = [];
+        for (const key of keys) {
+          try {
+            const res = await window.storage.get(key, false);
+            if (res?.value) {
+              const parsed = JSON.parse(res.value);
+              loaded.push({
+                id: key.replace("closet:", ""),
+                dataUrl: parsed.dataUrl,
+                category: parsed.category || "other",
+              });
+            }
+          } catch (innerErr) {
+            console.error("Failed to load closet item", key, innerErr);
+          }
+        }
+        setItems(loaded);
+      } catch (err) {
+        console.error("Failed to list closet:", err);
+        setSaveError(`Couldn't load saved closet: ${err.message || "unknown error"}`);
+      } finally {
+        setClosetLoading(false);
+      }
+    }
+    loadCloset();
+  }, []);
+
+  async function persistItem(dataUrl, category) {
+    const id = crypto.randomUUID();
+    if (storageAvailable) {
+      try {
+        const saved = await window.storage.set(
+          `closet:${id}`,
+          JSON.stringify({ dataUrl, category }),
+          false
+        );
+        if (!saved) throw new Error("storage.set returned null");
+      } catch (err) {
+        console.error("Failed to save closet item:", err);
+        setSaveError(`Photo added but not saved: ${err.message || "unknown error"}. It won't survive a refresh.`);
+      }
+    }
+    setItems((prev) => [...prev, { id, dataUrl, category }]);
+  }
+
+  async function handleFiles(e) {
+    const files = Array.from(e.target.files || []);
+    const category = e.target.dataset.category || "other";
+    e.target.value = "";
+    for (const file of files) {
+      try {
+        const dataUrl = await resizeImage(file);
+        await persistItem(dataUrl, category);
+      } catch (err) {
+        console.error("Failed to process photo:", err);
+      }
+    }
+  }
+
+  async function removeItem(id) {
+    setItems((prev) => prev.filter((i) => i.id !== id));
+    setResult(null);
+    if (!storageAvailable) return;
+    try {
+      await window.storage.delete(`closet:${id}`, false);
+    } catch (err) {
+      console.error("Failed to delete closet item:", err);
+    }
+  }
+
+  function stopStream() {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+  }
+
+  useEffect(() => stopStream, []);
+
+  async function openCamera(category) {
+    setCameraCategory(category);
+    setCameraError("");
+    setPreviewShot(null);
+    setCameraOpen(true);
+    setCameraReady(false);
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError("Camera isn't available in this browser.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 1280 } },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+      setCameraReady(true);
+    } catch (err) {
+      console.error("Camera access failed:", err);
+      setCameraError(
+        err.name === "NotAllowedError"
+          ? "Camera permission was denied. Allow camera access, or choose from your photo library instead."
+          : `Couldn't open the camera: ${err.message || err.name || "unknown error"}`
+      );
+    }
+  }
+
+  function closeCamera() {
+    stopStream();
+    setCameraOpen(false);
+    setPreviewShot(null);
+    setCameraError("");
+  }
+
+  function switchCameraCategory(category) {
+    setCameraCategory(category);
+  }
+
+  function capturePhoto() {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+
+    const guide = GUIDES[cameraCategory] || GUIDES.shirt;
+    const bbox = guide.bbox || { x: 0, y: 0, w: 100, h: 100 };
+
+    const rect = video.getBoundingClientRect();
+    const containerAspect = rect.width / rect.height;
+    const nativeW = video.videoWidth;
+    const nativeH = video.videoHeight;
+    const nativeAspect = nativeW / nativeH;
+
+    // The video is displayed with object-fit: cover, so the visible native
+    // pixel region is a centered crop of the full frame. Work out that
+    // visible region first, then map the guide's percentage bbox onto it.
+    let visibleW, visibleH, offsetX, offsetY;
+    if (nativeAspect > containerAspect) {
+      visibleH = nativeH;
+      visibleW = nativeH * containerAspect;
+      offsetX = (nativeW - visibleW) / 2;
+      offsetY = 0;
+    } else {
+      visibleW = nativeW;
+      visibleH = nativeW / containerAspect;
+      offsetX = 0;
+      offsetY = (nativeH - visibleH) / 2;
+    }
+
+    const cropX = offsetX + (bbox.x / 100) * visibleW;
+    const cropY = offsetY + (bbox.y / 100) * visibleH;
+    const cropW = (bbox.w / 100) * visibleW;
+    const cropH = (bbox.h / 100) * visibleH;
+
+    const cap = 1200;
+    let outW = cropW;
+    let outH = cropH;
+    if (outW > outH && outW > cap) {
+      outH = Math.round((outH * cap) / outW);
+      outW = cap;
+    } else if (outH > cap) {
+      outW = Math.round((outW * cap) / outH);
+      outH = cap;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(outW));
+    canvas.height = Math.max(1, Math.round(outH));
+    canvas
+      .getContext("2d")
+      .drawImage(video, cropX, cropY, cropW, cropH, 0, 0, canvas.width, canvas.height);
+    setPreviewShot(canvas.toDataURL("image/jpeg", 0.88));
+  }
+
+  function retakeShot() {
+    setPreviewShot(null);
+  }
+
+  async function useShot() {
+    if (!previewShot) return;
+    const shot = previewShot;
+    setPreviewShot(null);
+    await persistItem(shot, cameraCategory);
+  }
+
+  function openLibraryFallback(category) {
+    if (libraryFallbackRef.current) {
+      libraryFallbackRef.current.dataset.category = category;
+      libraryFallbackRef.current.click();
+    }
+  }
+
+  async function generateFit() {
+    if (items.length < 2 || !genre) return;
+    setLoading(true);
+    setError("");
+    setResult(null);
+
+    const content = [];
+    items.forEach((item, i) => {
+      const catLabel = CATEGORIES.find((c) => c.key === item.category)?.label; content.push({ type: "text", text: catLabel ? `Item ${i + 1} (${catLabel}):` : `Item ${i + 1}:` });
+      content.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: "image/jpeg",
+          data: item.dataUrl.split(",")[1],
+        },
+      });
+    });
+
+    content.push({
+      type: "text",
+      text: `Above are ${items.length} numbered photos of individual clothing items from someone's real closet. Where a label like "(Shirt)" or "(Pants)" appears after an item number, that's the confirmed garment type — trust it. Look carefully at each photo for its true color/pattern/material before deciding anything. Do not guess or assume; base every choice only on what's visibly in the photos.
+
+Build ONE outfit ("fit") from these items in the "${genre}" style/genre. Use only items shown above — do not invent clothing that isn't pictured. Pick as many items as make sense for a complete outfit (you don't have to use all items, and you don't need to force a bag/shoes/etc if nothing pictured fits).
+
+If the closet genuinely doesn't have great options for this genre, still do your best and be honest about the stretch in your description.
+
+Respond with ONLY raw JSON, no markdown fences, no commentary, no text before or after it, in exactly this shape:
+{"lookName": "short punchy 2-4 word outfit name", "description": "2 short sentences max on how this reads as ${genre} and why these pieces work together", "stylingTips": ["short actionable styling tip", "another tip", "another tip"], "selectedItems": [1, 3, 4]}
+
+Keep every string short. "selectedItems" must be an array of the Item numbers (integers, 1-indexed) you chose, in the order they should be described.`,
+    });
+
+    try {
+      const parsed = await callClaude(content, 1500);
+
+      const selected = (parsed.selectedItems || [])
+        .map((n) => items[n - 1])
+        .filter(Boolean);
+
+      if (selected.length === 0) throw new Error("Model didn't select any items");
+
+      setResult({
+        lookName: parsed.lookName || genre,
+        description: parsed.description || "",
+        stylingTips: parsed.stylingTips || [],
+        selected,
+      });
+      setLookNumber((n) => n + 1);
+    } catch (err) {
+      console.error("generateFit error:", err);
+      setError(`Couldn't generate a look: ${err.message || "unknown error"}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function analyzeColors() {
+    if (items.length < 2) return;
+    setColorLoading(true);
+    setColorError("");
+    setColorResult(null);
+
+    const content = [];
+    items.forEach((item, i) => {
+      const catLabel = CATEGORIES.find((c) => c.key === item.category)?.label; content.push({ type: "text", text: catLabel ? `Item ${i + 1} (${catLabel}):` : `Item ${i + 1}:` });
+      content.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: "image/jpeg",
+          data: item.dataUrl.split(",")[1],
+        },
+      });
+    });
+
+    content.push({
+      type: "text",
+      text: `Above are ${items.length} numbered photos of individual clothing items from someone's real closet. Where a label like "(Shirt)" or "(Pants)" appears after an item number, that's the confirmed garment type — trust it. Look carefully at each photo for its true color/pattern/material before deciding anything. Do not guess; base everything only on what's visibly in the photos.
+
+Figure out: (1) the 2-3 strongest color-combo pairings/outfits achievable from this specific closet, and (2) general style notes about this person's palette (undertones, what colors they're missing, what to avoid pairing).
+
+Respond with ONLY raw JSON, no markdown fences, no commentary, no text before or after it, in exactly this shape:
+{"combos": [{"name": "short 2-4 word combo name", "itemNumbers": [1,3], "why": "1 short sentence on why these colors work together"}], "paletteNotes": "2 short sentences of general color/style advice about this closet as a whole"}
+
+"itemNumbers" refers to the Item numbers above (integers, 1-indexed). Include 2-3 combos. Keep every string short.`,
+    });
+
+    try {
+      const parsed = await callClaude(content, 1500);
+
+      const combos = (parsed.combos || [])
+        .map((c) => ({
+          name: c.name || "Combo",
+          why: c.why || "",
+          selected: (c.itemNumbers || []).map((n) => items[n - 1]).filter(Boolean),
+        }))
+        .filter((c) => c.selected.length > 0);
+
+      if (combos.length === 0) throw new Error("Model didn't return any usable combos");
+
+      setColorResult({ combos, paletteNotes: parsed.paletteNotes || "" });
+    } catch (err) {
+      console.error("analyzeColors error:", err);
+      setColorError(`Couldn't analyze colors: ${err.message || "unknown error"}`);
+    } finally {
+      setColorLoading(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        background: "radial-gradient(ellipse 900px 500px at 50% -5%, rgba(164,94,255,0.16), transparent 60%), radial-gradient(ellipse 700px 400px at 100% 20%, rgba(94,235,255,0.08), transparent 60%), #07070C",
+        minHeight: "100vh",
+        color: "#EDEFF4",
+        fontFamily: "'Sora', system-ui, sans-serif",
+      }}
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=Sora:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+        .fc-display { font-family: 'Chakra Petch', sans-serif; letter-spacing: 0.02em; }
+        .fc-mono { font-family: 'JetBrains Mono', monospace; }
+        .fc-scroll::-webkit-scrollbar { height: 6px; }
+        .fc-scroll::-webkit-scrollbar-thumb { background: #1E2230; border-radius: 4px; }
+        .fc-btn, .fc-chip, .fc-x {
+          transition: transform 0.12s ease, opacity 0.12s ease, box-shadow 0.15s ease;
+        }
+        .fc-btn:active:not(:disabled), .fc-chip:active, .fc-x:active {
+          transform: scale(0.96);
+        }
+        .fc-btn:disabled { opacity: 0.6; }
+        .fc-btn:focus-visible, .fc-chip:focus-visible, .fc-x:focus-visible {
+          outline: 2px solid #C9FF3E; outline-offset: 2px;
+        }
+        .fc-glow {
+          box-shadow: 0 0 0 1px rgba(201,255,62,0.25), 0 8px 24px -8px rgba(201,255,62,0.35);
+        }
+        @keyframes fc-pop {
+          0% { transform: scale(0.9); opacity: 0; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+        .fc-pop { animation: fc-pop 0.25s ease; }
+        @keyframes fc-spin { to { transform: rotate(360deg); } }
+        .animate-spin { animation: fc-spin 1s linear infinite; }
+        * { box-sizing: border-box; }
+        body { margin: 0; }
+        @keyframes fc-spinY {
+          from { transform: rotateY(0deg); }
+          to { transform: rotateY(360deg); }
+        }
+        @keyframes fc-holo-shift {
+          0% { background-position: 0% 50%; }
+          100% { background-position: 200% 50%; }
+        }
+        @keyframes fc-holo-float {
+          0% { transform: translateY(0px); }
+          100% { transform: translateY(-7px); }
+        }
+        .fc-holo-float {
+          animation: fc-holo-float 3.2s ease-in-out infinite alternate;
+        }
+        .fc-wordmark {
+          font-family: 'Chakra Petch', sans-serif;
+          font-weight: 900;
+          text-align: center;
+          background: linear-gradient(120deg, #5EEBFF 0%, #FF5EDB 25%, #A45EFF 50%, #C9FF3E 75%, #5EEBFF 100%);
+          background-size: 300% 300%;
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+          animation: fc-holo-shift 6s linear infinite;
+          filter: drop-shadow(0 0 22px rgba(164,94,255,0.35));
+        }
+      `}</style>
+
+      <SparkleField />
+
+      <div style={{ maxWidth: 560, margin: "0 auto", padding: "28px 18px 60px", position: "relative", zIndex: 1 }}>
+        {/* Hero */}
+        <div style={{ textAlign: "center", marginBottom: 6 }}>
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "flex-end", gap: 16, marginBottom: 6 }}>
+            <HoloGarment guideKey="hoodie" size={68} duration="8.5s" floatDelay="0.2s" />
+            <HoloGarment guideKey="shirt" size={92} duration="10s" floatDelay="0s" />
+            <HoloGarment guideKey="pants" size={68} duration="9.2s" floatDelay="0.5s" />
+          </div>
+          <p className="fc-mono" style={{ fontSize: 9.5, color: "#4A5266", margin: "2px 0 0", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            ‹ drag to spin ›
+          </p>
+          <h1 className="fc-wordmark" style={{ fontSize: "clamp(34px, 9vw, 52px)", lineHeight: 1, margin: "6px 0 0" }}>
+            FIT-CHECK
+          </h1>
+          <p className="fc-mono" style={{ fontSize: 12, color: "#8B93A6", margin: "10px 0 20px", textTransform: "uppercase" }}>
+            snap your closet. pick a vibe. we build the fit.
+          </p>
+        </div>
+
+        {/* Lookbook */}
+        <div style={{ marginBottom: 26 }}>
+          <div className="fc-mono" style={{ fontSize: 12, color: "#8B93A6", textTransform: "uppercase", marginBottom: 10 }}>
+            Lookbook — tap a look to jump in
+          </div>
+          <div
+            className="fc-scroll"
+            style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 8, perspective: "1000px" }}
+          >
+            {POSTERS.map((poster, i) => {
+              const tilt = i === 0 ? -7 : i === POSTERS.length - 1 ? 7 : 0;
+              return (
+                <button
+                  key={poster.genre}
+                  className="fc-btn"
+                  onClick={() => jumpToGenre(poster.genre)}
+                  style={{
+                    flexShrink: 0,
+                    width: 168,
+                    height: 236,
+                    borderRadius: 12,
+                    border: `1px solid ${poster.accent}33`,
+                    background: poster.bg,
+                    padding: 12,
+                    display: "flex",
+                    flexDirection: "column",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    position: "relative",
+                    overflow: "hidden",
+                    transform: `rotateY(${tilt}deg)`,
+                    transformStyle: "preserve-3d",
+                  }}
+                >
+                  <div
+                    className="fc-mono"
+                  style={{
+                    position: "absolute",
+                    top: 10,
+                    right: -28,
+                    transform: "rotate(35deg)",
+                    background: poster.accent,
+                    color: "#07070C",
+                    fontSize: 8.5,
+                    fontWeight: 700,
+                    padding: "2px 30px",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {poster.badge}
+                </div>
+
+                <div style={{ display: "flex", flex: 1, gap: 6, marginTop: 14, marginBottom: 10 }}>
+                  <div style={{ flex: 1.3, display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={{ flex: 1.3 }}>
+                      <GarmentIcon guideKey={poster.items[0]} color={poster.accent} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <GarmentIcon guideKey={poster.items[1]} color={poster.accent} />
+                    </div>
+                  </div>
+                  <div style={{ flex: 0.8, display: "flex", alignItems: "flex-end" }}>
+                    <div style={{ width: "100%", height: "55%" }}>
+                      <GarmentIcon guideKey={poster.items[2]} color={poster.accent} />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="fc-display" style={{ fontSize: 19, lineHeight: 1.05, color: "#EDEFF4" }}>
+                  {poster.genre}
+                </div>
+                <div style={{ fontSize: 11, color: "#8B93A6", marginTop: 3, marginBottom: 8, lineHeight: 1.3 }}>
+                  {poster.tagline}
+                </div>
+                <div
+                  className="fc-mono"
+                  style={{ fontSize: 9.5, color: poster.accent, textTransform: "uppercase", letterSpacing: "0.04em" }}
+                >
+                  Try this look →
+                </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ height: 1, background: "#1E2230", margin: "0 0 26px" }} />
+
+        {!storageAvailable && (
+          <div
+            style={{
+              marginBottom: 20,
+              padding: 12,
+              borderRadius: 6,
+              background: "#0F1117",
+              border: "1px solid #FF4D6A",
+              color: "#EDEFF4",
+              fontSize: 12.5,
+              lineHeight: 1.5,
+            }}
+          >
+            Photo saving isn't available in this preview, so items will reset if you reload or close this. Open this artifact in its own tab/window if you need photos to persist between sessions.
+          </div>
+        )}
+
+        {/* Closet section */}
+        <div style={{ marginBottom: 30 }}>
+          <div className="fc-mono" style={{ fontSize: 12, color: "#8B93A6", textTransform: "uppercase", marginBottom: 10 }}>
+            Your closet — {closetLoading ? "loading..." : `${items.length} item${items.length === 1 ? "" : "s"}`}
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(4, 1fr)",
+              gap: 10,
+            }}
+          >
+            {items.map((item) => (
+              <div
+                key={item.id}
+                style={{
+                  position: "relative",
+                  aspectRatio: "1",
+                  borderRadius: 6,
+                  overflow: "hidden",
+                  background: "#0F1117",
+                  border: "1px solid #1E2230",
+                }}
+              >
+                <img
+                  src={item.dataUrl}
+                  alt="closet item"
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
+                <div style={{ position: "absolute", top: 4, left: 4 }}>
+                  <SwingTag rotate={-16} />
+                </div>
+                {item.category && item.category !== "other" && (
+                  <div
+                    className="fc-mono"
+                    style={{
+                      position: "absolute",
+                      bottom: 0,
+                      left: 0,
+                      right: 0,
+                      fontSize: 9,
+                      textAlign: "center",
+                      padding: "2px 0",
+                      background: "rgba(20,19,15,0.75)",
+                      color: "#C9FF3E",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {CATEGORIES.find((c) => c.key === item.category)?.label || item.category}
+                  </div>
+                )}
+                <button
+                  className="fc-x"
+                  onClick={() => removeItem(item.id)}
+                  aria-label="Remove item"
+                  style={{
+                    position: "absolute",
+                    top: 4,
+                    right: 4,
+                    width: 20,
+                    height: 20,
+                    borderRadius: "50%",
+                    background: "rgba(20,19,15,0.8)",
+                    border: "none",
+                    color: "#EDEFF4",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                  }}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+            <button
+              className="fc-btn"
+              onClick={() => openCamera(cameraCategory)}
+              style={{
+                aspectRatio: "1",
+                borderRadius: 6,
+                border: "1.5px dashed #1E2230",
+                background: "transparent",
+                color: "#8B93A6",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 4,
+                cursor: "pointer",
+              }}
+            >
+              <Plus size={20} />
+              <span className="fc-mono" style={{ fontSize: 10 }}>ADD</span>
+            </button>
+          </div>
+          <input
+            ref={libraryFallbackRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFiles}
+            style={{ display: "none" }}
+          />
+          {items.length === 0 && !closetLoading && (
+            <p style={{ fontSize: 13, color: "#8B93A6", marginTop: 10 }}>
+              Tap add, line the item up in the outline, and snap. Your closet is saved automatically.
+            </p>
+          )}
+          {saveError && (
+            <p style={{ fontSize: 12, color: "#FF4D6A", marginTop: 10 }}>{saveError}</p>
+          )}
+        </div>
+
+        <div style={{ height: 1, background: "#1E2230", margin: "0 0 26px" }} />
+
+        {/* Genre picker */}
+        <div ref={genreSectionRef} style={{ marginBottom: 26 }}>
+          <div className="fc-mono" style={{ fontSize: 12, color: "#8B93A6", textTransform: "uppercase", marginBottom: 10 }}>
+            Pick a genre
+          </div>
+          <div
+            className="fc-scroll"
+            style={{
+              display: "flex",
+              gap: 8,
+              overflowX: "auto",
+              paddingBottom: 6,
+            }}
+          >
+            {GENRES.map((g) => {
+              const active = genre === g;
+              return (
+                <button
+                  key={g}
+                  className="fc-chip"
+                  onClick={() => {
+                    setGenre(g);
+                    setResult(null);
+                  }}
+                  style={{
+                    flexShrink: 0,
+                    padding: "8px 14px",
+                    borderRadius: 4,
+                    border: active ? "1.5px solid #C9FF3E" : "1.5px solid #1E2230",
+                    background: active ? "#C9FF3E" : "#0F1117",
+                    color: active ? "#07070C" : "#EDEFF4",
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 12,
+                    textTransform: "uppercase",
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {g}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Generate button */}
+        <button
+          className={`fc-btn${items.length >= 2 && genre ? " fc-glow" : ""}`}
+          onClick={generateFit}
+          disabled={items.length < 2 || !genre || loading}
+          style={{
+            width: "100%",
+            padding: "17px",
+            borderRadius: 8,
+            border: "none",
+            background: items.length < 2 || !genre ? "#1E2230" : "#C9FF3E",
+            color: items.length < 2 || !genre ? "#8B93A6" : "#07070C",
+            fontFamily: "'Chakra Petch', sans-serif",
+            fontSize: 21,
+            letterSpacing: "0.04em",
+            cursor: items.length < 2 || !genre || loading ? "not-allowed" : "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+          }}
+        >
+          {loading ? (
+            <>
+              <Loader2 size={18} className="animate-spin" /> COOKING UP YOUR FIT...
+            </>
+          ) : (
+            <>
+              <Sparkles size={18} /> STYLE ME 🔥
+            </>
+          )}
+        </button>
+        <p className="fc-mono" style={{ fontSize: 10.5, color: "#8B93A6", marginTop: 6, textAlign: "center" }}>
+          not vibes, actual analysis of your actual clothes
+        </p>
+        {items.length < 2 && (
+          <p style={{ fontSize: 12, color: "#8B93A6", marginTop: 8, textAlign: "center" }}>
+            Add at least 2 items to generate a fit.
+          </p>
+        )}
+
+        <button
+          className="fc-btn"
+          onClick={analyzeColors}
+          disabled={items.length < 2 || colorLoading}
+          style={{
+            width: "100%",
+            padding: "13px",
+            marginTop: 10,
+            borderRadius: 6,
+            border: "1.5px solid " + (items.length < 2 ? "#1E2230" : "#C9FF3E"),
+            background: "transparent",
+            color: items.length < 2 ? "#1E2230" : "#C9FF3E",
+            fontFamily: "'JetBrains Mono', monospace",
+            fontSize: 13,
+            textTransform: "uppercase",
+            letterSpacing: "0.03em",
+            cursor: items.length < 2 || colorLoading ? "not-allowed" : "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+          }}
+        >
+          {colorLoading ? (
+            <>
+              <Loader2 size={15} className="animate-spin" /> READING YOUR COLORS...
+            </>
+          ) : (
+            <>
+              <Palette size={15} /> Best Color Combos & Style
+            </>
+          )}
+        </button>
+
+        {colorError && (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 12,
+              borderRadius: 6,
+              background: "#0F1117",
+              border: "1px solid #FF4D6A",
+              color: "#EDEFF4",
+              fontSize: 13,
+              display: "flex",
+              gap: 8,
+              alignItems: "flex-start",
+            }}
+          >
+            <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 2, color: "#FF4D6A" }} />
+            {colorError}
+          </div>
+        )}
+
+        {colorResult && (
+          <div
+            className="fc-pop"
+            style={{
+              marginTop: 16,
+              padding: 20,
+              borderRadius: 12,
+              background: "#0F1117",
+              border: "1px solid #C9FF3E",
+              boxShadow: "0 0 0 1px rgba(201,255,62,0.15), 0 12px 32px -12px rgba(201,255,62,0.3)",
+            }}
+          >
+            <div className="fc-mono" style={{ fontSize: 11, color: "#8B93A6", textTransform: "uppercase", marginBottom: 4 }}>
+              Color & style read
+            </div>
+            <h2 className="fc-display" style={{ fontSize: 28, margin: "0 0 14px", color: "#C9FF3E" }}>
+              Best combos
+            </h2>
+
+            {colorResult.combos.map((combo, ci) => (
+              <div key={ci} style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6, color: "#EDEFF4" }}>
+                  {combo.name}
+                </div>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: `repeat(${Math.min(combo.selected.length, 4)}, 1fr)`,
+                    gap: 6,
+                    marginBottom: 6,
+                  }}
+                >
+                  {combo.selected.map((item) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        aspectRatio: "1",
+                        borderRadius: 6,
+                        overflow: "hidden",
+                        border: "1px solid #1E2230",
+                      }}
+                    >
+                      <img
+                        src={item.dataUrl}
+                        alt="combo item"
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <p style={{ fontSize: 13, lineHeight: 1.5, color: "#8B93A6", margin: 0 }}>{combo.why}</p>
+              </div>
+            ))}
+
+            {colorResult.paletteNotes && (
+              <>
+                <div className="fc-mono" style={{ fontSize: 11, color: "#8B93A6", textTransform: "uppercase", margin: "16px 0 8px" }}>
+                  Palette notes
+                </div>
+                <p style={{ fontSize: 13.5, lineHeight: 1.6, color: "#EDEFF4", margin: 0 }}>
+                  {colorResult.paletteNotes}
+                </p>
+              </>
+            )}
+          </div>
+        )}
+
+        {error && (
+          <div
+            style={{
+              marginTop: 16,
+              padding: 12,
+              borderRadius: 6,
+              background: "#0F1117",
+              border: "1px solid #FF4D6A",
+              color: "#EDEFF4",
+              fontSize: 13,
+              display: "flex",
+              gap: 8,
+              alignItems: "flex-start",
+            }}
+          >
+            <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 2, color: "#FF4D6A" }} />
+            {error}
+          </div>
+        )}
+
+        {/* Result */}
+        {result && (
+          <div
+            className="fc-pop"
+            style={{
+              marginTop: 30,
+              padding: 20,
+              borderRadius: 12,
+              background: "#0F1117",
+              border: "1px solid #C9FF3E",
+              boxShadow: "0 0 0 1px rgba(201,255,62,0.15), 0 12px 32px -12px rgba(201,255,62,0.3)",
+            }}
+          >
+            <div className="fc-mono" style={{ fontSize: 11, color: "#8B93A6", textTransform: "uppercase", marginBottom: 4 }}>
+              Look {String(lookNumber).padStart(2, "0")} — {genre}
+            </div>
+            <h2 className="fc-display" style={{ fontSize: 34, margin: "0 0 14px", color: "#C9FF3E" }}>
+              {result.lookName}
+            </h2>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: `repeat(${Math.min(result.selected.length, 4)}, 1fr)`,
+                gap: 8,
+                marginBottom: 16,
+              }}
+            >
+              {result.selected.map((item) => (
+                <div
+                  key={item.id}
+                  style={{
+                    aspectRatio: "1",
+                    borderRadius: 6,
+                    overflow: "hidden",
+                    border: "1px solid #1E2230",
+                  }}
+                >
+                  <img
+                    src={item.dataUrl}
+                    alt="selected"
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                </div>
+              ))}
+            </div>
+
+            <p style={{ fontSize: 14, lineHeight: 1.6, color: "#EDEFF4", marginBottom: 16 }}>
+              {result.description}
+            </p>
+
+            {result.stylingTips.length > 0 && (
+              <>
+                <div className="fc-mono" style={{ fontSize: 11, color: "#8B93A6", textTransform: "uppercase", marginBottom: 8 }}>
+                  Styling notes
+                </div>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13.5, lineHeight: 1.7, color: "#EDEFF4" }}>
+                  {result.stylingTips.map((tip, i) => (
+                    <li key={i}>{tip}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            <button
+              className="fc-btn"
+              onClick={generateFit}
+              style={{
+                marginTop: 18,
+                background: "transparent",
+                border: "1px solid #1E2230",
+                color: "#8B93A6",
+                padding: "10px 14px",
+                borderRadius: 6,
+                fontFamily: "'JetBrains Mono', monospace",
+                fontSize: 12,
+                textTransform: "uppercase",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <RotateCcw size={13} /> Try another fit
+            </button>
+          </div>
+        )}
+
+        {items.length === 0 && (
+          <div style={{ marginTop: 40, textAlign: "center", color: "#1E2230" }}>
+            <Shirt size={48} style={{ margin: "0 auto" }} />
+          </div>
+        )}
+      </div>
+
+      {cameraOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "#000",
+            zIndex: 1000,
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {/* Live preview / captured shot */}
+          <div style={{ position: "relative", flex: 1, overflow: "hidden", background: "#0A0A08" }}>
+            {!previewShot && (
+              <video
+                ref={videoRef}
+                playsInline
+                muted
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+            )}
+            {previewShot && (
+              <div style={{ width: "100%", height: "100%", background: "#07070C", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <img
+                  src={previewShot}
+                  alt="captured"
+                  style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }}
+                />
+              </div>
+            )}
+            {!previewShot && cameraReady && <GarmentGuideOverlay categoryKey={cameraCategory} />}
+
+            {/* Corner viewfinder brackets */}
+            {!previewShot && cameraReady && (
+              <>
+                {[
+                  { top: 14, left: 14, borderRight: "none", borderBottom: "none" },
+                  { top: 14, right: 14, borderLeft: "none", borderBottom: "none" },
+                  { bottom: 14, left: 14, borderRight: "none", borderTop: "none" },
+                  { bottom: 14, right: 14, borderLeft: "none", borderTop: "none" },
+                ].map((pos, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      position: "absolute",
+                      width: 22,
+                      height: 22,
+                      border: "2px solid #C9FF3E",
+                      ...pos,
+                      pointerEvents: "none",
+                    }}
+                  />
+                ))}
+              </>
+            )}
+
+            <button
+              className="fc-x"
+              onClick={closeCamera}
+              aria-label="Close camera"
+              style={{
+                position: "absolute",
+                top: 16,
+                right: 16,
+                width: 34,
+                height: 34,
+                borderRadius: "50%",
+                background: "rgba(20,19,15,0.7)",
+                border: "1px solid #1E2230",
+                color: "#EDEFF4",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+              }}
+            >
+              <X size={18} />
+            </button>
+
+            {!previewShot && cameraReady && (
+              <div
+                className="fc-mono"
+                style={{
+                  position: "absolute",
+                  top: 16,
+                  left: 16,
+                  fontSize: 11,
+                  color: "#C9FF3E",
+                  background: "rgba(20,19,15,0.7)",
+                  padding: "5px 10px",
+                  borderRadius: 4,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                }}
+              >
+                Fit the {CATEGORIES.find((c) => c.key === cameraCategory)?.label.toLowerCase()} in the outline
+              </div>
+            )}
+
+            {cameraError && (
+              <div
+                style={{
+                  position: "absolute",
+                  left: 16,
+                  right: 16,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  background: "#0F1117",
+                  border: "1px solid #FF4D6A",
+                  borderRadius: 8,
+                  padding: 16,
+                  color: "#EDEFF4",
+                  fontSize: 13.5,
+                  lineHeight: 1.5,
+                }}
+              >
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  <AlertCircle size={18} style={{ flexShrink: 0, color: "#FF4D6A" }} />
+                  <span>{cameraError}</span>
+                </div>
+                <button
+                  className="fc-btn"
+                  onClick={() => openLibraryFallback(cameraCategory)}
+                  style={{
+                    width: "100%",
+                    padding: "10px",
+                    borderRadius: 6,
+                    border: "1px solid #C9FF3E",
+                    background: "transparent",
+                    color: "#C9FF3E",
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 12,
+                    textTransform: "uppercase",
+                    cursor: "pointer",
+                  }}
+                >
+                  Choose from photo library
+                </button>
+              </div>
+            )}
+
+            {!cameraReady && !cameraError && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#8B93A6",
+                }}
+              >
+                <Loader2 size={28} className="animate-spin" />
+              </div>
+            )}
+          </div>
+
+          {/* Bottom control panel */}
+          <div style={{ background: "#07070C", padding: "14px 14px 22px", borderTop: "1px solid #1E2230" }}>
+            {!previewShot ? (
+              <>
+                <div
+                  className="fc-scroll"
+                  style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 12 }}
+                >
+                  {CATEGORIES.map((c) => {
+                    const active = cameraCategory === c.key;
+                    return (
+                      <button
+                        key={c.key}
+                        className="fc-chip"
+                        onClick={() => switchCameraCategory(c.key)}
+                        style={{
+                          flexShrink: 0,
+                          padding: "7px 12px",
+                          borderRadius: 4,
+                          border: active ? "1.5px solid #C9FF3E" : "1.5px solid #1E2230",
+                          background: active ? "#C9FF3E" : "transparent",
+                          color: active ? "#07070C" : "#EDEFF4",
+                          fontFamily: "'JetBrains Mono', monospace",
+                          fontSize: 11.5,
+                          textTransform: "uppercase",
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 28 }}>
+                  <button
+                    className="fc-btn"
+                    onClick={() => openLibraryFallback(cameraCategory)}
+                    aria-label="Choose from library"
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: "50%",
+                      border: "1px solid #1E2230",
+                      background: "transparent",
+                      color: "#8B93A6",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <Plus size={18} />
+                  </button>
+                  <button
+                    className="fc-btn"
+                    onClick={capturePhoto}
+                    disabled={!cameraReady}
+                    aria-label="Capture photo"
+                    style={{
+                      width: 68,
+                      height: 68,
+                      borderRadius: "50%",
+                      border: "4px solid #C9FF3E",
+                      background: cameraReady ? "#EDEFF4" : "#1E2230",
+                      cursor: cameraReady ? "pointer" : "not-allowed",
+                    }}
+                  />
+                  <div style={{ width: 44 }} />
+                </div>
+              </>
+            ) : (
+              <div style={{ display: "flex", gap: 10 }}>
+                <button
+                  className="fc-btn"
+                  onClick={retakeShot}
+                  style={{
+                    flex: 1,
+                    padding: "14px",
+                    borderRadius: 6,
+                    border: "1px solid #1E2230",
+                    background: "transparent",
+                    color: "#EDEFF4",
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: 13,
+                    textTransform: "uppercase",
+                    cursor: "pointer",
+                  }}
+                >
+                  Retake
+                </button>
+                <button
+                  className="fc-btn"
+                  onClick={useShot}
+                  style={{
+                    flex: 2,
+                    padding: "14px",
+                    borderRadius: 6,
+                    border: "none",
+                    background: "#FF4D6A",
+                    color: "#EDEFF4",
+                    fontFamily: "'Chakra Petch', sans-serif",
+                    fontSize: 18,
+                    letterSpacing: "0.03em",
+                    cursor: "pointer",
+                  }}
+                >
+                  Use Photo
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<Root />);
+
+</script>
+</body>
+</html>
